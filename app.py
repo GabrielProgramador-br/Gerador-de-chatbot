@@ -103,9 +103,9 @@ def extrair_json(texto):
 
 def gerar_top_5_ferramentas(resumo):
     prompt = f"""
-Você é um especialista em IA, automação e arquitetura de soluções.
+Você é um especialista em IA, automação inteligente e arquitetura de soluções com IA.
 
-Com base no projeto abaixo, recomende exatamente 5 ferramentas/plataformas de IA adequadas.
+Com base no projeto abaixo, recomende exatamente 5 ferramentas/plataformas que sejam obrigatoriamente ferramentas de IA.
 
 Responda exclusivamente em JSON válido, sem markdown, sem explicações e sem texto fora do JSON.
 
@@ -113,17 +113,21 @@ Formato obrigatório:
 {{
   "ferramentas": [
     {{
-      "nome": "Nome da ferramenta",
-      "motivo": "Por que ela faz sentido para o projeto"
+      "nome": "Nome da ferramenta de IA",
+      "motivo": "Por que essa ferramenta de IA faz sentido para o projeto"
     }}
   ]
 }}
 
-Regras:
+Regras obrigatórias:
 - Retorne exatamente 5 ferramentas.
-- Use ferramentas reais e conhecidas.
+- Recomende apenas ferramentas, plataformas, modelos ou serviços que usem IA de forma central.
+- Não recomende ferramentas genéricas de gestão, produtividade, CRM, BI, design, UX, documentação ou automação comum, a menos que o recurso principal indicado seja claramente de IA.
+- Não recomende ferramentas como Trello, Jira, Notion, Excel, Power BI, Figma, Miro, Zapier ou Make, exceto se o foco for um módulo específico de IA da própria ferramenta.
+- Priorize ferramentas reais, conhecidas e com documentação pública.
 - Não invente ferramentas.
 - Não inclua links nesta etapa.
+- O motivo deve explicar claramente qual capacidade de IA será usada: LLM, RAG, agentes, embeddings, visão computacional, speech analytics, classificação, geração de texto, automação cognitiva ou análise preditiva.
 
 Descrição do projeto:
 {resumo}
@@ -140,7 +144,32 @@ Descrição do projeto:
         st.warning("Não foi possível interpretar o JSON de ferramentas retornado pela SAI.")
         return []
 
-    return dados.get("ferramentas", [])[:5]
+    ferramentas = dados.get("ferramentas", [])
+
+    ferramentas_filtradas = []
+    bloqueadas = [
+        "trello", "jira", "notion", "excel", "power bi", "figma",
+        "miro", "zapier", "make", "asana", "monday", "clickup"
+    ]
+
+    for ferramenta in ferramentas:
+        nome = (ferramenta.get("nome") or "").lower()
+        motivo = (ferramenta.get("motivo") or "").lower()
+
+        eh_bloqueada = any(item in nome for item in bloqueadas)
+        menciona_ia = any(
+            termo in motivo
+            for termo in [
+                "ia", "inteligência artificial", "llm", "rag", "agente",
+                "machine learning", "modelo", "generativa", "embedding",
+                "classificação", "predição", "automação cognitiva"
+            ]
+        )
+
+        if not eh_bloqueada or menciona_ia:
+            ferramentas_filtradas.append(ferramenta)
+
+    return ferramentas_filtradas[:5]
 
 
 def buscar_referencias_por_ferramenta(ferramentas, resumo):
@@ -153,8 +182,8 @@ def buscar_referencias_por_ferramenta(ferramentas, resumo):
             continue
 
         query = (
-            f"{nome} official documentation AI automation productivity use cases "
-            f"benefits efficiency implementation {resumo[:150]}"
+            f"{nome} official AI documentation artificial intelligence generative AI "
+            f"machine learning LLM RAG agents API use cases implementation"
         )
 
         contexto, fontes = buscar_informacoes_tavily(query, max_results=3)
@@ -215,12 +244,14 @@ A partir da descrição do projeto e das referências específicas por ferrament
 - Não gere UX
 - Não gere arquitetura detalhada
 - Sempre inclua o ganho estimado em porcentagem
+- Recomende e analise apenas ferramentas de IA
+- Não inclua ferramentas genéricas de gestão, produtividade, CRM, BI, design, documentação ou automação comum
+- Só aceite ferramentas cujo uso principal no projeto envolva IA, como LLM, RAG, agentes, embeddings, machine learning, visão computacional, speech analytics, classificação, geração de texto ou análise preditiva
 - Cada ferramenta obrigatoriamente precisa ter pelo menos uma referência com link
 - Use as referências específicas de cada ferramenta
 - Não use uma referência genérica para todas as ferramentas
 - Se uma ferramenta não tiver referência encontrada, informe: "Referência direta não encontrada via Tavily"
-- Mesmo quando a referência direta não for encontrada, mantenha a ferramenta e sinalize que o ganho é uma estimativa baseada no potencial de automação
-
+- Mesmo quando a referência direta não for encontrada, mantenha a ferramenta e sinalize que o ganho é uma estimativa baseada no potencial de IA e automação inteligente
 ⚠️ GERE APENAS OS TÓPICOS ABAIXO:
 
 ## Objetivo do Projeto
@@ -232,11 +263,16 @@ Explique:
 - Benefício para usuários e empresa
 
 ## Possibilidade de Utilizar IA
-Avalie como IA pode ser utilizada no projeto.
+Informe apenas:
+- Se é possível utilizar IA neste projeto
+- Como a IA poderia ser aplicada de forma geral
+- Qual benefício esperado essa aplicação traria
 
-Para cada possibilidade:
-- Explique rapidamente o uso
-- Explique o benefício esperado
+Regras:
+- Não cite nomes de ferramentas nesta seção
+- Não liste plataformas
+- Não antecipe as ferramentas recomendadas
+- Explique a possibilidade de uso da IA de forma conceitual e objetiva
 
 ## Top 5 Ferramentas Recomendadas
 
