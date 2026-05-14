@@ -1,18 +1,268 @@
+import os
+import json
+import re
 import streamlit as st
 import requests
-import graphviz
+from dotenv import load_dotenv
 
-# Configuração da página
+load_dotenv()
+
 st.set_page_config(page_title="Gerador de Projeto com Análise de IA", layout="wide")
 st.title("🧠 Gerador de Projeto com Análise de IA")
 
-st.markdown("Cole abaixo um resumo da ideia do seu projeto, e receba um plano completo com fluxo, possibilidades de uso de IA, prompts e integrações.")
+st.markdown(
+    "Cole abaixo um resumo da ideia do seu projeto e receba uma análise objetiva "
+    "com foco em IA, ferramentas recomendadas, ganho estimado e referências."
+)
 
-apiKey = "vVJjd0HIpUGcQ7pqP3pgQA"
-url = "https://sai-library.saiapplications.com"
-headers = {"X-Api-Key": apiKey}
+TAVILY_API_KEY = "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"
+SAI_API_KEY = "vVJjd0HIpUGcQ7pqP3pgQA"
 
-# Entrada do usuário
+SAI_URL = "https://sai-library.saiapplications.com/api/templates/643388be603840da1c23b1b1/execute"
+
+
+def buscar_informacoes_tavily(query, max_results=5):
+    if not TAVILY_API_KEY:
+        return "", []
+
+    url = "https://api.tavily.com/search"
+
+    data = {
+        "api_key": TAVILY_API_KEY,
+        "query": query,
+        "search_depth": "advanced",
+        "max_results": max_results
+    }
+
+    try:
+        response = requests.post(url, json=data, timeout=30)
+        response.raise_for_status()
+
+        results = response.json().get("results", [])
+
+        contexto = "\n\n".join(
+            [
+                f"Fonte: {item.get('url')}\nTítulo: {item.get('title')}\nConteúdo: {item.get('content')}"
+                for item in results
+            ]
+        )
+
+        fontes = [
+            {
+                "titulo": item.get("title"),
+                "url": item.get("url"),
+                "conteudo": item.get("content")
+            }
+            for item in results
+            if item.get("url")
+        ]
+
+        return contexto, fontes
+
+    except Exception as e:
+        st.warning(f"Não foi possível consultar a Tavily: {e}")
+        return "", []
+
+
+def chamar_sai(prompt):
+    data = {
+        "inputs": {
+            "prompt": prompt,
+        }
+    }
+
+    headers = {
+        "X-Api-Key": SAI_API_KEY
+    }
+
+    try:
+        response = requests.post(SAI_URL, json=data, headers=headers, timeout=60)
+        response.raise_for_status()
+        return response.text
+
+    except Exception as e:
+        st.error(f"Erro ao consultar SAI Data: {e}")
+        return None
+
+
+def extrair_json(texto):
+    try:
+        return json.loads(texto)
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", texto, re.DOTALL)
+
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
+def gerar_top_5_ferramentas(resumo):
+    prompt = f"""
+Você é um especialista em IA, automação e arquitetura de soluções.
+
+Com base no projeto abaixo, recomende exatamente 5 ferramentas/plataformas de IA adequadas.
+
+Responda exclusivamente em JSON válido, sem markdown, sem explicações e sem texto fora do JSON.
+
+Formato obrigatório:
+{{
+  "ferramentas": [
+    {{
+      "nome": "Nome da ferramenta",
+      "motivo": "Por que ela faz sentido para o projeto"
+    }}
+  ]
+}}
+
+Regras:
+- Retorne exatamente 5 ferramentas.
+- Use ferramentas reais e conhecidas.
+- Não invente ferramentas.
+- Não inclua links nesta etapa.
+
+Descrição do projeto:
+{resumo}
+"""
+
+    resposta = chamar_sai(prompt)
+
+    if not resposta:
+        return []
+
+    dados = extrair_json(resposta)
+
+    if not dados:
+        st.warning("Não foi possível interpretar o JSON de ferramentas retornado pela SAI.")
+        return []
+
+    return dados.get("ferramentas", [])[:5]
+
+
+def buscar_referencias_por_ferramenta(ferramentas, resumo):
+    referencias = {}
+
+    for ferramenta in ferramentas:
+        nome = ferramenta.get("nome")
+
+        if not nome:
+            continue
+
+        query = (
+            f"{nome} official documentation AI automation productivity use cases "
+            f"benefits efficiency implementation {resumo[:150]}"
+        )
+
+        contexto, fontes = buscar_informacoes_tavily(query, max_results=3)
+
+        referencias[nome] = {
+            "contexto": contexto,
+            "fontes": fontes
+        }
+
+    return referencias
+
+
+def formatar_referencias_por_ferramenta(referencias):
+    blocos = []
+
+    for nome, dados in referencias.items():
+        fontes = dados.get("fontes", [])
+
+        fontes_formatadas = "\n".join(
+            [
+                f"- {fonte.get('titulo') or 'Sem título'}: {fonte.get('url')}\n  Trecho: {fonte.get('conteudo')}"
+                for fonte in fontes
+            ]
+        )
+
+        if not fontes_formatadas:
+            fontes_formatadas = "- Nenhuma referência encontrada."
+
+        blocos.append(
+            f"""
+Ferramenta: {nome}
+Referências encontradas:
+{fontes_formatadas}
+"""
+        )
+
+    return "\n\n".join(blocos)
+
+
+def processar_com_sai_data(resumo, referencias_por_ferramenta):
+    referencias_formatadas = formatar_referencias_por_ferramenta(referencias_por_ferramenta)
+
+    prompt = f"""
+Você é um especialista em IA, automação, arquitetura de soluções e produtos digitais.
+
+A partir da descrição do projeto e das referências específicas por ferramenta, gere uma análise objetiva e estratégica.
+
+📌 REGRAS:
+- Seja extremamente direto
+- Use markdown limpo
+- Use apenas títulos ##
+- Responda com bullets curtos
+- Não gere textos longos
+- Não gere fluxo
+- Não gere planejamento
+- Não gere prompts
+- Não gere personas
+- Não gere UX
+- Não gere arquitetura detalhada
+- Sempre inclua o ganho estimado em porcentagem
+- Cada ferramenta obrigatoriamente precisa ter pelo menos uma referência com link
+- Use as referências específicas de cada ferramenta
+- Não use uma referência genérica para todas as ferramentas
+- Se uma ferramenta não tiver referência encontrada, informe: "Referência direta não encontrada via Tavily"
+- Mesmo quando a referência direta não for encontrada, mantenha a ferramenta e sinalize que o ganho é uma estimativa baseada no potencial de automação
+
+⚠️ GERE APENAS OS TÓPICOS ABAIXO:
+
+## Objetivo do Projeto
+Explique:
+- Qual problema resolve
+- Qual necessidade atende
+- Impacto esperado
+- Ganhos operacionais
+- Benefício para usuários e empresa
+
+## Possibilidade de Utilizar IA
+Avalie como IA pode ser utilizada no projeto.
+
+Para cada possibilidade:
+- Explique rapidamente o uso
+- Explique o benefício esperado
+
+## Top 5 Ferramentas Recomendadas
+
+Para cada ferramenta informe obrigatoriamente:
+- Nome da ferramenta
+- Como seria utilizada no projeto
+- Tipo de IA utilizada
+- Benefício operacional
+- Facilidade de implementação
+- Ganho estimado de produtividade/eficiência em porcentagem
+- Referência usada para embasar o ganho estimado, com link
+
+## Referências Consultadas
+Liste todas as fontes utilizadas, agrupadas por ferramenta.
+
+Descrição do projeto:
+{resumo}
+
+Referências específicas por ferramenta:
+{referencias_formatadas}
+"""
+
+    return chamar_sai(prompt)
+
+
 resumo = st.text_area("✍️ Resumo da ideia do projeto", height=300)
 
 if st.button("Gerar Projeto"):
@@ -20,265 +270,29 @@ if st.button("Gerar Projeto"):
         st.warning("Por favor, insira um resumo do projeto.")
         st.stop()
 
-    with st.spinner("Gerando etapas..."):
+    if not TAVILY_API_KEY:
+        st.error("A variável TAVILY_API_KEY não foi encontrada no arquivo .env.")
+        st.stop()
 
-        
-        prompt_parte_1 = f"""
-Você é um especialista em UX, IA, automação, produtos digitais e arquitetura de soluções. A partir de uma breve descrição de qualquer projeto, sua tarefa é criar um planejamento completo, técnico e estratégico, avaliando se o projeto pode ou não utilizar IA, em quais pontos ela agrega valor e como poderia ser aplicada de forma segura, viável e útil.
+    if not SAI_API_KEY:
+        st.error("A variável SAI_API_KEY não foi encontrada no arquivo .env.")
+        st.stop()
 
-📌 INSTRUÇÕES GERAIS:
-Seja claro e objetivo em cada etapa, explicando apenas o essencial para orientar a implementação.
+    with st.spinner("Identificando ferramentas recomendadas..."):
+        ferramentas = gerar_top_5_ferramentas(resumo)
 
-Utilize linguagem acessível, porém profissional e estratégica.
+    if not ferramentas:
+        st.error("Não foi possível gerar a lista de ferramentas.")
+        st.stop()
 
-Gere respostas com subtítulos para cada item.
-Seja objetivo e sintético. Responda cada seção com no máximo 3 a 5 bullets curtos.
+    with st.spinner("Buscando referências específicas para cada ferramenta..."):
+        referencias_por_ferramenta = buscar_referencias_por_ferramenta(ferramentas, resumo)
 
-Evite explicações longas, textos extensos ou aprofundamentos desnecessários.
+    with st.spinner("Gerando análise final..."):
+        conteudo = processar_com_sai_data(resumo, referencias_por_ferramenta)
 
-Priorize aplicabilidade prática, clareza e resumo executivo.
-
-Cada bullet deve ter no máximo 2 linhas.
-
-NÃO gere:
-- prompts para IA
-- exemplos de prompt
-- personas
-- tom de voz
-- instruções para chatbot
-- exemplos conversacionais
-
-✳️ FORMATAÇÃO OBRIGATÓRIA:
-- Use markdown limpo
-- Use títulos com ##
-- Use listas com bullets
-- NÃO use ###
-- NÃO escreva textos gigantes sem quebra
-- Separe todas as seções visualmente
-
-✳️ INSTRUÇÃO FINAL:
-Responda como um especialista técnico e estratégico, com clareza, objetividade e foco em aplicabilidade prática.
-
-🧠 GERE APENAS OS TÓPICOS ABAIXO:
-
-## Objetivo do Projeto
-Explique claramente qual problema o projeto resolve, qual necessidade atende e qual o impacto esperado para usuários e empresa.
-
-## O que o Projeto Resolve e Como
-Descreva com profundidade como a solução funciona na prática.
-
-Explique:
-- processos automatizados
-- ganhos operacionais
-- redução de esforço manual
-- melhorias na experiência do usuário
-
-## Possibilidade de Utilizar IA (Sim ou Não)
-Avalie se o projeto pode utilizar Inteligência Artificial.
-
-Explique:
-- Onde a IA pode ser aplicada
-- Qual tipo de IA faz sentido
-- Benefícios esperados
-- Casos de uso possíveis
-
-Considere:
-- IA generativa
-- Classificação automática
-- Automação inteligente
-- Predição
-- OCR
-- NLP
-- Recomendação
-- Análise de dados
-- Assistentes virtuais
-
-## Tipo Ideal de Solução
-Explique qual o modelo ideal para implementação do projeto.
-
-Exemplos:
-- Sistema automatizado
-- Plataforma híbrida
-- Aplicação web
-- Aplicativo
-- Dashboard operacional
-- Assistente virtual
-- Fluxo automatizado
-- Integração entre sistemas
-
-Justifique tecnicamente.
-
-## Pontos de Atenção
-Liste riscos:
-- Técnicos
-- Operacionais
-- UX
-- Segurança
-- Escalabilidade
-- Custos
-- Dependência de terceiros
-
-Inclua ações preventivas.
-
-Descrição do projeto:
-{resumo}
-"""
-
-        data_1 = {
-            "inputs": {
-                "prompt": prompt_parte_1,
-            }
-        }
-
-        response_1 = requests.post(
-            f"{url}/api/templates/643388be603840da1c23b1b1/execute",
-            json=data_1,
-            headers=headers
-        )
-
-        if response_1.status_code == 200:
-            conteudo_1 = response_1.text
-        else:
-            st.error(f"Erro na API (Parte 1): {response_1.status_code}")
-            st.stop()
-
-        prompt_parte_2 = f"""
-Você é um especialista em UX, IA, automação, produtos digitais e arquitetura de soluções.
-
-Abaixo está a análise estratégica inicial do projeto:
-
-{conteudo_1}
-
-Agora continue o planejamento seguindo TODAS as regras abaixo.
-
-📌 INSTRUÇÕES GERAIS:
-Seja claro e objetivo em cada etapa, explicando apenas o essencial para orientar a implementação.
-
-Utilize linguagem acessível, porém profissional e estratégica.
-Seja objetivo e sintético. Responda cada seção com no máximo 3 a 5 bullets curtos.
-
-Evite explicações longas, textos extensos ou aprofundamentos desnecessários.
-
-Priorize aplicabilidade prática, clareza e resumo executivo.
-
-Cada bullet deve ter no máximo 2 linhas.
-
-NÃO gere:
-- prompts para IA
-- exemplos de prompt
-- personas
-- tom de voz
-- instruções para chatbot
-- exemplos conversacionais
-
-✳️ FORMATAÇÃO OBRIGATÓRIA:
-- Use markdown limpo
-- Use títulos com ##
-- Use listas com bullets
-- NÃO use ###
-- NÃO escreva textos gigantes sem quebra
-- Separe todas as seções visualmente
-
-✳️ INSTRUÇÃO FINAL:
-Responda como um especialista técnico e estratégico, com clareza, objetividade e foco em aplicabilidade prática.
-
-🧠 GERE APENAS OS TÓPICOS ABAIXO:
-
-## Planejamento de Falhas / Exceções
-Descreva como o sistema deve reagir a:
-- Erros de integração
-- Dados inválidos
-- Falha de API
-- Ausência de resposta
-- Instabilidade
-- Fluxos inesperados
-
-Inclua:
-- contingência
-- fallback
-- monitoramento
-- rastreabilidade
-- logs
-- alertas
-
-## Desenho do Fluxo do Usuário
-Descreva a jornada principal no formato:
-
-[Início] → [Entrada de Dados] → [Processamento] → [Consulta/API] → [Resultado] → [Confirmação] → [Encerramento]
-
-Ao final, gere também uma versão simplificada para diagrama visual.
-
-IMPORTANTE:
-- O fluxo simplificado deve ficar em uma linha
-- Utilize "→"
-- Não use markdown de lista nessa parte
-
-## Estimativa de Tempo do Projeto
-Crie uma estimativa macro de implementação dividida por etapas.
-
-Considere:
-- Levantamento de requisitos
-- UX e arquitetura (se aplicável)
-- Desenvolvimento
-- Implementação de IA (se aplicável)
-- Testes
-- Homologação
-- Deploy
-- Monitoramento inicial
-
-Para cada etapa:
-- Explique rapidamente o objetivo
-- Informe estimativa em horas
-- Informe estimativa em dias considerando 1 dia = 8 horas
-
-Ao final:
-- Gere estimativa total consolidada
-- Informe fatores que podem aumentar prazo
-- Informe fatores que podem reduzir prazo
-
-Descrição original do projeto:
-{resumo}
-"""
-
-        data_2 = {
-            "inputs": {
-                "prompt": prompt_parte_2,
-            }
-        }
-
-        response_2 = requests.post(
-            f"{url}/api/templates/643388be603840da1c23b1b1/execute",
-            json=data_2,
-            headers=headers
-        )
-
-        if response_2.status_code == 200:
-            conteudo_2 = response_2.text
-        else:
-            st.error(f"Erro na API (Parte 2): {response_2.status_code}")
-            st.stop()
-
-        conteudo = conteudo_1 + "\n\n" + conteudo_2
-
-        # Separar texto do fluxo para virar imagem
-        texto_projeto = conteudo
-        fluxo_bruto = conteudo
-
+    if conteudo:
         st.markdown("## 📋 Análise do Projeto Gerada")
-        st.markdown(texto_projeto, unsafe_allow_html=True)
+        st.markdown(conteudo, unsafe_allow_html=True)
 
-        # Geração do fluxo visual com graphviz
-        st.markdown("## 🔄 Fluxo da Solução (visual)")
-        with st.expander("Ver fluxo visual"):
-            fluxo = graphviz.Digraph()
-
-            linhas = fluxo_bruto.strip().split("\n")
-            for linha in linhas:
-                if "→" in linha:
-                    etapas = [et.strip() for et in linha.split("→")]
-                    for i in range(len(etapas) - 1):
-                        fluxo.edge(etapas[i], etapas[i + 1])
-
-            st.graphviz_chart(fluxo)
-
-    st.success("✅ Projeto finalizado!!")
+    st.success("✅ Análise finalizada!")
