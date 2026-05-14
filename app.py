@@ -3,9 +3,8 @@ import json
 import re
 import streamlit as st
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
+
 
 st.set_page_config(page_title="Gerador de Projeto com Análise de IA", layout="wide")
 st.title("🧠 Gerador de Projeto com Análise de IA")
