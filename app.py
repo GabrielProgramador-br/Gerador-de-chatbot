@@ -4,6 +4,14 @@ import re
 import streamlit as st
 import requests
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+SAI_API_KEY = os.getenv("SAI_API_KEY")
+
+SAI_URL = "https://sai-library.saiapplications.com/api/templates/643388be603840da1c23b1b1/execute"
 
 
 st.set_page_config(page_title="Gerador de Projeto com Análise de IA", layout="wide")
@@ -13,12 +21,6 @@ st.markdown(
     "Cole abaixo um resumo da ideia do seu projeto e receba uma análise objetiva "
     "com foco em IA, ferramentas recomendadas, ganho estimado e referências."
 )
-
-TAVILY_API_KEY = "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"
-SAI_API_KEY = "vVJjd0HIpUGcQ7pqP3pgQA"
-
-SAI_URL = "https://sai-library.saiapplications.com/api/templates/643388be603840da1c23b1b1/execute"
-
 
 def buscar_informacoes_tavily(query, max_results=5):
     if not TAVILY_API_KEY:
